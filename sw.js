@@ -1,5 +1,5 @@
 // Nota Kilat: simpan file aplikasi agar bisa dibuka tanpa internet.
-const CACHE = "nota-kilat-v1";
+const CACHE = "nota-kilat-v2";
 const ASSETS = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png"];
 
 self.addEventListener("install", e => {

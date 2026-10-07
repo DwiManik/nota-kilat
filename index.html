@@ -158,6 +158,7 @@ textarea.fallback{font-family:var(--mono);font-size:12px}
 @media (min-width:700px){.sheet{border-radius:16px}}
 .calc{background:var(--accent-soft);border-radius:10px;padding:10px 12px;font-size:.88rem;font-variant-numeric:tabular-nums}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.range{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 /* standalone base */
 html{-webkit-text-size-adjust:100%}
 :root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -250,7 +251,14 @@ img{max-width:100%}
       <button class="chip" aria-pressed="false" data-p="week">7 hari</button>
       <button class="chip" aria-pressed="false" data-p="month">Bulan ini</button>
       <button class="chip" aria-pressed="false" data-p="all">Semua</button>
+      <button class="chip" aria-pressed="false" data-p="custom">Pilih tanggal</button>
     </div>
+    <div class="range" id="rangeBox" hidden>
+      <label>Dari tanggal<input id="dFrom" type="date"></label>
+      <label>Sampai tanggal<input id="dTo" type="date"></label>
+    </div>
+    <input id="hq" type="search" placeholder="Cari no. nota, pembeli, atau nama barang…" autocomplete="off">
+    <p class="hint" id="rangeLabel"></p>
     <div class="stats" id="salesStats"></div>
     <section class="panel">
       <h2>Nota</h2>
@@ -682,14 +690,43 @@ $("ilist").addEventListener("click",e=>{const a=e.target.closest("[data-in]"),b=
 
 /* ---------- riwayat tab ---------- */
 $("period").addEventListener("click",e=>{const b=e.target.closest(".chip");if(!b)return;S.period=b.dataset.p;$("period").querySelectorAll(".chip").forEach(x=>x.setAttribute("aria-pressed",x===b?"true":"false"));renderHistory()});
-function periodStart(){const d=new Date();d.setHours(0,0,0,0);if(S.period==="week")d.setDate(d.getDate()-6);if(S.period==="month")d.setDate(1);if(S.period==="all")return 0;return d.getTime()}
+const ymd=d=>d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+const parseYmd=v=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v||"");return m?new Date(+m[1],+m[2]-1,+m[3]):null};
+const HARI=["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"],BULAN=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+const longDate=d=>HARI[d.getDay()]+", "+d.getDate()+" "+BULAN[d.getMonth()]+" "+d.getFullYear();
+(function(){const t=ymd(new Date());$("dFrom").value=t;$("dTo").value=t;$("dFrom").max=t;$("dTo").max=t})();
+function periodRange(){
+  const d=new Date();d.setHours(0,0,0,0);
+  if(S.period==="all")return [0,Infinity];
+  if(S.period==="custom"){
+    let a=parseYmd($("dFrom").value),b=parseYmd($("dTo").value);
+    if(!a&&!b)return [0,Infinity];if(!a)a=b;if(!b)b=a;if(a>b){const t=a;a=b;b=t}
+    const end=new Date(b);end.setDate(end.getDate()+1);return [a.getTime(),end.getTime()];
+  }
+  if(S.period==="week")d.setDate(d.getDate()-6);
+  if(S.period==="month")d.setDate(1);
+  return [d.getTime(),Infinity];
+}
+function rangeText(){
+  if(S.period!=="custom")return "";
+  const a=parseYmd($("dFrom").value),b=parseYmd($("dTo").value);
+  if(!a&&!b)return "Pilih tanggal untuk menampilkan transaksi.";
+  const x=a||b,y=b||a,lo=x<=y?x:y,hi=x<=y?y:x;
+  return lo.getTime()===hi.getTime()?"Menampilkan "+longDate(lo)+".":"Menampilkan "+longDate(lo)+" sampai "+longDate(hi)+".";
+}
+["dFrom","dTo"].forEach(id=>$(id).addEventListener("change",renderHistory));
+$("hq").addEventListener("input",renderHistory);
 function renderHistory(){
-  const from=periodStart();
-  const sales=S.sales.filter(s=>s.ts>=from),rest=S.stockins.filter(s=>s.ts>=from);
+  const [from,to]=periodRange(),term=$("hq").value.trim().toLowerCase();
+  $("rangeBox").hidden=S.period!=="custom";
+  const match=s=>!term||[s.inv,s.buyer].concat((s.lines||[]).map(l=>l.name)).some(v=>String(v||"").toLowerCase().includes(term));
+  const sales=S.sales.filter(s=>s.ts>=from&&s.ts<to&&match(s)),rest=S.stockins.filter(s=>s.ts>=from&&s.ts<to&&(!term||String(s.name||"").toLowerCase().includes(term)));
+  $("rangeLabel").textContent=rangeText()+(term?(rangeText()?" ":"")+"Hasil pencarian \""+$("hq").value.trim()+"\": "+nf(sales.length)+" nota.":"");
+  $("rangeLabel").hidden=!$("rangeLabel").textContent;
   const omzet=sales.reduce((a,s)=>a+(s.total||0),0),profit=sales.reduce((a,s)=>a+(s.profit||0),0),buy=rest.reduce((a,s)=>a+(s.total||0),0);
   $("salesStats").innerHTML='<div class="stat"><span>Omzet</span><b>'+rp(omzet)+'</b></div><div class="stat '+(profit<0?'neg':'pos')+'"><span>Laba kotor</span><b>'+rp(profit)+'</b></div><div class="stat"><span>Jumlah nota</span><b>'+nf(sales.length)+'</b></div><div class="stat"><span>Belanja stok</span><b>'+rp(buy)+'</b></div>';
   if(!S.salesReady){$("hlist").innerHTML='<div class="empty">Memuat riwayat…</div>'}
-  else if(!sales.length){$("hlist").innerHTML='<div class="empty">Belum ada nota pada periode ini. Nota yang disimpan dari tab Kasir akan muncul di sini.</div>'}
+  else if(!sales.length){$("hlist").innerHTML='<div class="empty">'+(term?'Tidak ada nota yang cocok dengan pencarian pada periode ini.':'Belum ada nota pada periode ini. Nota yang disimpan dari tab Kasir akan muncul di sini.')+'</div>'}
   else $("hlist").innerHTML=sales.map(s=>{
     const open=S.openSale===s.id;
     return '<div class="hrow"><button class="hbtn" type="button" data-sale="'+esc(s.id)+'" aria-expanded="'+open+'"><span>'+esc(s.inv)+'<small>'+fmtDate(s.ts)+(s.buyer?' · '+esc(s.buyer):'')+'</small></span><span class="amt">'+rp(s.total)+'<small>laba '+rp(s.profit)+'</small></span></button>'+
